@@ -59,8 +59,9 @@ class Retriever:
         self.budget_ms = float(r.get("budget_ms", 100))
         self.k_facts = int(r.get("top_k_facts", 6))
         self.k_snips = int(r.get("top_k_snippets", 3))
-        self.min_fact = float(r.get("min_fact_score", 0.30))
-        self.min_snip = float(r.get("min_snippet_score", 0.35))
+        self.min_fact = float(r.get("min_fact_score", 0.15))
+        self.min_snip = float(r.get("min_snippet_score", 0.20))
+        self.n_core = int(r.get("core_facts", 3))
         self.n_recent = int(r.get("recent_turns", 6))
         self.pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="retrieval")
         self._prefetch: Future | None = None
@@ -68,11 +69,21 @@ class Retriever:
 
     def prefetch(self, session_id: str | None, first_turn: bool) -> None:
         """Start loading context that doesn't depend on the transcript. Call when the user stops talking."""
-        def work() -> list[Turn]:
+        def work() -> tuple[list[Turn], list[Fact]]:
             self.store.embed(["warm"])           # keeps the embedder hot (first-call latency)
-            return self.store.recent_turns(self.n_recent, exclude_session=session_id) if first_turn else []
+            recent = self.store.recent_turns(self.n_recent, exclude_session=session_id) if first_turn else []
+            return recent, self.core_facts()
         self._prefetch_sid = session_id
         self._prefetch = self.pool.submit(work)
+
+    def core_facts(self) -> list[Fact]:
+        """A few always-relevant facts (explicitly remembered or high-confidence and often used)."""
+        if self.n_core <= 0:
+            return []
+        facts = [f for f in self.store.list_facts() if f.explicit or f.confidence >= 0.85]
+        facts.sort(key=lambda f: (-(f.category == "person" and "name" in f.text.lower()), -f.explicit,
+                                  -f.use_count, -f.confidence))
+        return facts[: self.n_core]
 
     def retrieve(self, query: str, session_id: str | None, first_turn: bool = True,
                  budget_ms: float | None = None) -> Retrieved:
@@ -100,7 +111,9 @@ class Retriever:
             out.timed_out = True
             log.warning("retrieval exceeded %.0f ms budget; continuing without semantic results", budget * 1000)
         try:
-            out.recent = pre.result(timeout=max(0.005, budget - (time.perf_counter() - t0))) if pre else []
+            out.recent, core = pre.result(timeout=max(0.005, budget - (time.perf_counter() - t0))) if pre else ([], [])
+            seen = {f.id for f in out.facts}
+            out.facts = out.facts + [f for f in core if f.id not in seen]
         except FutTimeout:
             out.timed_out = True
         out.elapsed_ms = (time.perf_counter() - t0) * 1000

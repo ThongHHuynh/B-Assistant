@@ -64,8 +64,8 @@ def test_remember_and_recall_and_forget(cfg, store):
     assert store.list_facts()                     # not yet deleted
     assert "forgotten" in says(run(b, "yes"))
     assert store.list_facts(include_inactive=True) == []
-    # the source turn in the raw log is scrubbed too
-    assert all("Anna" not in t.text for t in store.session_turns(b.session_id) if t.role == "user")
+    # the raw log no longer contains it anywhere (source turn, Bi's echo, recall and confirmation turns)
+    assert all("Anna" not in t.text for t in store.session_turns(b.session_id))
 
 
 def test_forget_declined_keeps_fact(cfg, store):

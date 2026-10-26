@@ -304,7 +304,9 @@ class Brain:
         if isinstance(p, PendingForget):
             if yn == "yes":
                 for fid in p.fact_ids:
-                    self.store.delete_fact(fid, cascade=True, scrub_sources=True)
+                    f = self.store.get_fact(fid)
+                    phrases = [f.text.rstrip("."), to_second_person(f.text)] if f else []
+                    self.store.delete_fact(fid, cascade=True, scrub_sources=True, scrub_phrases=phrases)
                 yield from self._say_and_log(text, "Done. I've forgotten that.")
                 return True
             if yn == "no":
@@ -359,7 +361,7 @@ class Brain:
         yield Say(reply)
 
     def _forget(self, what: str, text: str) -> Iterator[Say]:
-        min_score = float(self.cfg.get("memory.retrieval.min_fact_score", 0.30))
+        min_score = float(self.cfg.get("memory.retrieval.forget_min_score", 0.25))
         hits = [(f, s) for f, s in self.store.search_facts(what, k=5) if s >= min_score]
         if not hits:
             yield from self._say_and_log(text, "I couldn't find anything like that in my memory.")

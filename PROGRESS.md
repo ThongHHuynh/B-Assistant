@@ -27,3 +27,21 @@ flagged below as **not yet verified live**.
   (`requirements-optional.txt`). A hash embedder is the last-resort fallback.
 - Vector index: sqlite-vec (works on Win/macOS/Linux wheels); exact numpy search over the same SQLite
   table is the fallback instead of Chroma (no extra service, fine at personal scale).
+
+## Stage 2 – memory: embeddings, retrieval, extractor, commands, import ✅
+- Semantic index: MiniLM embeddings of facts and conversation snippets in sqlite-vec (numpy fallback).
+- Retrieval per turn under a 100 ms budget, prefetching recent turns + core facts while STT finishes.
+  Measured: ~4 ms per retrieval on a small DB (query embedding ~2 ms).
+- Thresholds calibrated on real MiniLM scores: related query/fact pairs 0.18–0.65, unrelated ≤ 0.12,
+  so `min_fact_score` 0.15 / `min_snippet_score` 0.20 / forget 0.25 (the first guess of 0.30 dropped half the hits).
+- Background fact extractor (Haiku, JSON-schema output) every 6 turns and when a conversation pauses/ends;
+  contradictions supersede old facts; secrets and sensitive categories are filtered unless you said "remember".
+- Voice/text commands: "remember that…", "forget…" (confirms, then deletes the fact, its older versions,
+  the source turn + Bi's reply, and every log line quoting it), "what do you know about me".
+- `python -m bi.memory list|search|add|edit|delete|export|consolidate|stats|reindex|turns`.
+- Consolidation (nightly in-process + on demand): merge duplicates, summarize old sessions, decay/archive.
+- `python -m bi.import_history <file>`: ChatGPT / Claude JSON exports, generic JSON, markdown/text.
+- Tests: 35 passing (memory insert/supersede/forget, ranking, both vector backends, extractor,
+  privacy filters, consolidation, importers, semantic retrieval with the real MiniLM model).
+
+**Not verified live:** extractor and session summaries against the real model (no API key here).

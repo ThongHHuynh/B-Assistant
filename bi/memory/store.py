@@ -281,9 +281,11 @@ class MemoryStore:
             self._x("UPDATE facts SET archived=1, updated_at=? WHERE id=?", (time.time(), fid))
             self.index.set_active("fact", fid, False)
 
-    def delete_fact(self, fid: int, cascade: bool = True, scrub_sources: bool = False) -> list[int]:
+    def delete_fact(self, fid: int, cascade: bool = True, scrub_sources: bool = False,
+                    scrub_phrases: Iterable[str] = ()) -> list[int]:
         """Delete a fact completely: the row, its vector, and (cascade) the older versions it superseded.
-        scrub_sources also redacts the raw-log turns the facts came from and drops their snippets."""
+        scrub_sources also redacts the raw-log turns the facts came from (and the reply right after),
+        drops their snippets, and removes scrub_phrases wherever the log quotes them."""
         with self.lock:
             ids, frontier = [fid], [fid]
             while cascade and frontier:
@@ -302,9 +304,18 @@ class MemoryStore:
             self._x(f"UPDATE facts SET superseded_by=NULL WHERE superseded_by IN ({','.join('?' * len(ids))})", ids)
             if scrub_sources:
                 for tid in set(sources):
-                    self.redact_turn(tid)
-                    for (cid,) in self._q("SELECT id FROM chunks WHERE ? BETWEEN first_turn_id AND last_turn_id", (tid,)):
-                        self.delete_chunk(cid)
+                    src = self.turn(tid)
+                    nxt = self._q("SELECT id FROM turns WHERE session_id=? AND id>? AND role='assistant' "
+                                  "ORDER BY id LIMIT 1", (src.session_id, tid)) if src else []
+                    for t in [tid] + [r[0] for r in nxt]:
+                        self.redact_turn(t)
+                        for (cid,) in self._q("SELECT id FROM chunks WHERE ? BETWEEN first_turn_id AND last_turn_id", (t,)):
+                            self.delete_chunk(cid)
+            for phrase in {p.strip() for p in scrub_phrases if p and len(p.strip()) >= 8}:
+                like = f"%{phrase}%"
+                self._x("UPDATE turns SET text=REPLACE(text, ?, '[forgotten]') WHERE text LIKE ?", (phrase, like))
+                for (cid,) in self._q("SELECT id FROM chunks WHERE text LIKE ?", (like,)):
+                    self.delete_chunk(cid)
         return ids
 
     def touch_facts(self, ids: Iterable[int]) -> None:

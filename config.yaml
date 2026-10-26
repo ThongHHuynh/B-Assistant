@@ -46,8 +46,10 @@ memory:
     budget_ms: 100
     top_k_facts: 6
     top_k_snippets: 3
-    min_fact_score: 0.30
-    min_snippet_score: 0.35
+    min_fact_score: 0.15     # MiniLM cosine; related pairs measured 0.18-0.65, unrelated <= 0.12
+    min_snippet_score: 0.20
+    forget_min_score: 0.25   # stricter match before offering to delete
+    core_facts: 3            # always include the top explicit/high-confidence facts (e.g. your name)
     recent_turns: 6        # last turns from previous sessions shown in the prompt
   extractor:
     every_n_turns: 6       # also runs when a session ends
