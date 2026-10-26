@@ -45,3 +45,30 @@ flagged below as **not yet verified live**.
   privacy filters, consolidation, importers, semantic retrieval with the real MiniLM model).
 
 **Not verified live:** extractor and session summaries against the real model (no API key here).
+
+## Stage 3 – push-to-talk voice: STT + streaming sentence-by-sentence TTS ✅
+## Stage 4 – hands-free: wake word, VAD, state machine, follow-up, chime, barge-in ✅
+(Built together: push-to-talk is the same loop with Enter instead of the wake word.)
+- Mic: sounddevice, 16 kHz mono, 80 ms frames, callback -> queue; opens at the device rate and resamples
+  if 16 kHz isn't supported (common on Windows/macOS). Mute stops the stream (OS mic light goes off).
+- VAD: webrtcvad on 20 ms sub-frames + energy gate; 160 ms onset, 900 ms trailing silence, 15 s max.
+- STT: faster-whisper `base.en`, int8, loaded once and warmed up; filters Whisper's silence hallucinations.
+- TTS: Piper -> pyttsx3 -> OS voice (say / SAPI / espeak-ng), automatic fallback. Synthesis of sentence
+  N+1 overlaps playback of sentence N; the first chunk is cut at a comma once ≥24 chars.
+- State machine IDLE → LISTENING → THINKING → SPEAKING → FOLLOW_UP (6 s, no wake word) → IDLE, plus MUTED.
+- Barge-in: 240 ms of sustained speech stops playback within ~30 ms and the interrupting audio becomes
+  the next utterance. Speaker mode: 300 ms echo guard + adaptive echo level (mean level over the window
+  must exceed 2.5× echo). `headphones_mode: true` removes both. Bi's history records what you actually heard.
+- Bypass commands: stop (→ follow-up), cancel / never mind (→ idle), go to sleep (→ idle), mute.
+- Status line + hotkeys (m mute, q quit, Enter push-to-talk); reminders are spoken when idle.
+- Tests: VAD on fixtures (onset, 900 ms end, mid-sentence pause, silence/fan-noise timeout, max length,
+  barge-in vs echo), state machine transitions, and the full loop with fake mic/STT/TTS
+  (conversation + follow-up, barge-in, echo not triggering, stop/sleep, timeout, alerts, push-to-talk).
+- Fixtures are synthesized with espeak-ng plus a room-noise floor (`scripts/make_fixtures.py`); replace them
+  with real laptop-mic recordings of the same names for a stronger test.
+- Measured here: espeak-ng first audio 12 ms, pyttsx3 174 ms (first call). Fixed during testing:
+  barge-in echo guard was never armed (baseline computed before playback started); the wake chime
+  could trigger speech onset; a stale TTS chunk could play after a stop (race) – all fixed + tested.
+
+**Not verified live:** real microphone/speakers (container has none), Whisper STT, Piper voice and the
+openWakeWord model (downloads blocked). `python main.py --ptt` here reports the missing Whisper model clearly.
