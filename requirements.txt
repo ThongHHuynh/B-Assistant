@@ -1,0 +1,28 @@
+# Bi - pinned runtime dependencies. Python 3.11 recommended (3.11-3.12 supported).
+# LLM backends
+anthropic==2.3.0
+ollama==0.6.3
+# core
+PyYAML==6.0.3
+python-dotenv==1.2.4
+numpy==2.4.6
+httpx==0.28.1
+# audio I/O
+sounddevice==0.5.6
+soundfile==0.14.0
+# wake word / VAD / STT / TTS (all local)
+openwakeword==0.6.0
+onnxruntime==1.31.0
+webrtcvad-wheels==2.0.14.post1
+faster-whisper==1.2.1
+ctranslate2==4.8.4
+piper-tts==1.8.0
+pyttsx3==2.99
+# memory: embeddings (ONNX MiniLM) + vector index
+tokenizers==0.23.3
+sqlite-vec==0.1.9
+# file_search readers
+pypdf==6.21.2
+python-docx==1.2.0
+# tests
+pytest==9.1.1

@@ -1,0 +1,132 @@
+# Bi configuration. Every model name, threshold and path lives here.
+# Relative paths are resolved against the folder that contains this file.
+# Secrets (API keys) never go here: put them in .env (see .env.example).
+
+assistant:
+  name: Bi
+  user_name: ""            # optional; Bi also learns it from conversation
+  timezone: ""             # empty = system local time
+
+paths:
+  data_dir: data
+  db: data/bi.db
+  models_dir: models
+  log_file: data/logs/bi.log
+
+# ---------------------------------------------------------------- LLM ----
+llm:
+  backend: anthropic       # anthropic | ollama
+  max_history_turns: 8     # in-session user+assistant pairs sent as messages
+  anthropic:
+    chat_model: claude-haiku-5-5      # fast small model for normal turns
+    chat_effort: low                  # low keeps first-token latency down
+    think_model: claude-opus-5-5      # "think harder" routes one turn here
+    think_effort: medium
+    think_fallbacks: true             # server-side refusal fallback for think_model
+    extractor_model: claude-haiku-5-5 # memory fact extraction / summaries
+    max_tokens: 2048
+    thinking: adaptive                # adaptive | disabled (disabled: Haiku 5.5 only, effort <= high)
+    timeout_s: 30
+  ollama:
+    host: http://localhost:11434
+    chat_model: llama3.2:3b
+    think_model: qwen2.5:14b
+    extractor_model: llama3.2:3b
+    num_ctx: 8192
+    keep_alive: 30m
+
+# ------------------------------------------------------------- memory ----
+memory:
+  embeddings:
+    backend: auto          # auto (onnx -> sentence-transformers -> hash) | onnx | sentence-transformers | hash
+    model: sentence-transformers/all-MiniLM-L6-v2
+    onnx_url: https://chroma-onnx-models.s3.amazonaws.com/all-MiniLM-L6-v2/onnx.tar.gz
+  vector_index: auto       # auto | sqlite-vec | numpy
+  retrieval:
+    budget_ms: 100
+    top_k_facts: 6
+    top_k_snippets: 3
+    min_fact_score: 0.30
+    min_snippet_score: 0.35
+    recent_turns: 6        # last turns from previous sessions shown in the prompt
+  extractor:
+    every_n_turns: 6       # also runs when a session ends
+    enabled: true
+  session_timeout_s: 300   # a wake within this window continues the same session
+  consolidation:
+    nightly_at: "03:30"    # local time; runs in-process while Bi is running
+    duplicate_threshold: 0.90
+    summarize_after_days: 2
+    decay_after_days: 30
+    decay_factor: 0.85
+    archive_below: 0.20
+
+# -------------------------------------------------------------- audio ----
+audio:
+  sample_rate: 16000
+  frame_ms: 80
+  input_device: null       # null = system default; name substring or index
+  output_device: null
+  headphones_mode: false   # true: no echo guard, more sensitive barge-in
+  echo_guard_ms: 300       # ignore barge-in during the first N ms of playback
+  barge_in: true
+  barge_in_min_ms: 240     # sustained speech needed to interrupt
+  barge_in_echo_factor: 2.5  # speaker mode: mic RMS must exceed echo baseline x this
+  chime: true
+  chime_volume: 0.25
+
+wake:
+  engine: openwakeword     # openwakeword | porcupine
+  # Placeholder: no pretrained "Hey Bi" model exists. See docs/WAKEWORD.md.
+  model: hey_jarvis        # built-in name or a path such as models/hey_bi.onnx
+  threshold: 0.5
+  cooldown_s: 1.5
+  porcupine_keyword_path: ""   # .ppn file for the Porcupine engine
+
+vad:
+  aggressiveness: 2        # webrtcvad 0-3
+  speech_ratio: 0.5        # fraction of 20 ms sub-frames voiced to count a frame
+  onset_ms: 160            # sustained speech to count as "started talking"
+  trailing_silence_ms: 900
+  max_utterance_s: 15
+  listen_timeout_s: 5      # after the wake word, wait this long for speech
+  follow_up_s: 6           # FOLLOW_UP window (no wake word needed)
+  pre_roll_ms: 300
+  min_rms: 120             # frames quieter than this are never speech
+
+stt:
+  model: base.en           # tiny.en | base.en | small.en | medium.en | large-v3
+  compute_type: int8
+  device: cpu              # cpu | cuda | auto
+  beam_size: 1
+  language: en
+
+tts:
+  engine: piper            # piper | pyttsx3 | system   (falls back automatically)
+  piper_voice: en_US-lessac-medium
+  piper_length_scale: 1.0  # <1 faster speech
+  pyttsx3_rate: 185
+  first_chunk_min_chars: 24  # speak a first clause early (at a comma) to cut latency
+
+# -------------------------------------------------------------- tools ----
+tools:
+  enabled: [get_time, take_note, read_notes, set_timer, set_reminder,
+            list_reminders, cancel_reminder, web_search, file_search]
+  # Tools that change state or touch the network. Every call is logged.
+  side_effects: [take_note, set_timer, set_reminder, cancel_reminder]
+  network: [web_search]
+  # Tools that need a spoken "yes" before they run.
+  require_confirmation: [take_note, set_timer, set_reminder, cancel_reminder]
+  web_search:
+    provider: duckduckgo   # duckduckgo | brave | none  (brave needs BRAVE_API_KEY)
+    max_results: 3
+    timeout_s: 6
+  file_search:
+    folders: ["~/Documents", "~/Desktop"]
+    extensions: [".txt", ".md", ".pdf", ".docx", ".csv", ".json", ".py"]
+    max_results: 5
+    max_file_mb: 5
+
+ui:
+  status_line: true
+  hotkeys: true            # m = mute/unmute mic, q = quit (hands-free & ptt modes)

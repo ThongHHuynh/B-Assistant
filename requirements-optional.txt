@@ -1,0 +1,5 @@
+# Optional extras. Install with: pip install -r requirements-optional.txt
+# sentence-transformers backend for embeddings (same MiniLM model as the default ONNX backend; pulls in torch)
+sentence-transformers==6.2.0
+# Picovoice Porcupine wake word engine (needs PICOVOICE_ACCESS_KEY)
+pvporcupine==3.0.5
