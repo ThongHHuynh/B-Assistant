@@ -85,3 +85,22 @@ def test_barge_in_requires_sustained_speech_above_echo():
     assert hits[-1] and len(det.captured) >= 3
     hp = BargeInDetector(vad, min_ms=240, headphones=True)   # headphones: no guard, no echo test
     assert any(hp.feed(f, i * 80) for i, f in enumerate(loud[:4]))
+
+
+def test_wake_word_then_endpoint_on_fixture(cfg):
+    """Real openWakeWord placeholder model ('hey jarvis'); skipped if the model isn't downloaded."""
+    from bi.models import wake_ready
+    if not wake_ready(cfg)[0]:
+        pytest.skip("wake word model not downloaded (python -m bi.doctor --download)")
+    from bi.wake import make_wake
+    w = make_wake(cfg)
+    fr = frames("wake_then_question.wav")
+    hit = next((i for i, f in enumerate(fr) if w.process(f)), None)
+    assert hit is not None and hit * 80 < 2500                 # fires during/just after "hey jarvis"
+    ep = Endpointer(FrameVAD(), EC)
+    end = next(i for i, f in enumerate(fr[hit + 1:], hit + 1) if ep.feed(f) in ("end", "max"))
+    _, speech_end = speech_bounds("wake_then_question.wav")
+    assert 800 <= (end + 1) * 80 - speech_end <= 1300
+    # unrelated speech never wakes it
+    w2 = make_wake(cfg)
+    assert not any(w2.process(f) for f in frames("utterance.wav") + frames("long_speech.wav"))

@@ -395,7 +395,10 @@ class Brain:
                 log.warning("recall summary failed: %s", e)
         if not reply:
             parts = [to_second_person(f.text) for f in top[:4]]
-            reply = f"I know {len(facts)} things about you. For example, " + "; ".join(parts) + "."
+            if len(facts) == 1:
+                reply = f"So far I only know that {parts[0]}."
+            else:
+                reply = f"I know {len(facts)} things about you. For example, " + "; ".join(parts) + "."
         yield from self._say_and_log(text, reply)
 
     # ----------------------------------------------------------- bookkeeping --

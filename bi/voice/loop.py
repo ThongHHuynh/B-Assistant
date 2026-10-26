@@ -9,6 +9,7 @@ import logging
 import queue
 import threading
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -24,7 +25,9 @@ log = logging.getLogger(__name__)
 @dataclass
 class TurnMetrics:
     speech_end_at: float = 0.0          # endpointer decided the user finished
-    stt_ms: float = 0.0
+    stt_ms: float = 0.0                 # STT time on the critical path (after the endpoint)
+    stt_compute_ms: float = 0.0         # total STT compute (may have run speculatively, during the silence)
+    speculative_hit: bool = False
     retrieval_ms: float = 0.0
     llm_first_token_ms: float | None = None
     first_audio_ms: float | None = None  # end of user speech -> first audio out
@@ -56,6 +59,11 @@ class VoiceAssistant:
         self.barge = BargeInDetector(self.vad, self.frame_ms, int(a.get("barge_in_min_ms", 240)),
                                      int(a.get("echo_guard_ms", 300)), float(a.get("barge_in_echo_factor", 2.5)),
                                      self.headphones)
+        s = cfg.section("stt")
+        self.speculative = bool(s.get("speculative", True))
+        self.spec_frames = max(1, int(s.get("speculative_after_ms", 300)) // self.frame_ms)
+        self.stt_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="stt")
+        self.spec: tuple[int, Future, float] | None = None   # (speech_frames at snapshot, future, submit time)
         self.sm = StateMachine(on_change=self._on_state)
         self.ep: Endpointer | None = None
         self.cancel = threading.Event()
@@ -87,6 +95,29 @@ class VoiceAssistant:
 
     def _listen(self, timeout: float | None = None) -> None:
         self.ep = Endpointer(self.vad, self.ec, listen_timeout_s=timeout)
+        self._drop_spec()
+
+    def _drop_spec(self) -> None:
+        if self.spec is not None:
+            self.spec[1].cancel()
+            self.spec = None
+
+    def _timed_stt(self, audio: np.ndarray) -> tuple[str, float]:
+        t = time.perf_counter()
+        text = self.stt.transcribe(audio)
+        return text, (time.perf_counter() - t) * 1000
+
+    def _maybe_speculate(self) -> None:
+        """During the trailing silence, transcribe what was said so far. If the user doesn't resume,
+        the transcript is ready when the endpoint fires, taking STT off the critical path."""
+        ep = self.ep
+        if not (self.speculative and ep.speaking and ep.run_silence == self.spec_frames):
+            return
+        if self.spec is not None and self.spec[0] == ep.speech_frames:
+            return
+        self._drop_spec()
+        self.spec = (ep.speech_frames, self.stt_pool.submit(self._timed_stt, ep.audio()), time.perf_counter())
+        self.brain.prefetch()
 
     def alert(self, message: str) -> None:
         """Reminders/timers from other threads. Spoken when Bi isn't mid-answer."""
@@ -95,10 +126,18 @@ class VoiceAssistant:
     # ---------------------------------------------------------------- turn --
     def _start_turn(self, audio: np.ndarray) -> None:
         self.metrics = TurnMetrics(speech_end_at=time.perf_counter())
-        self.brain.prefetch()                       # retrieval prefetch overlaps with STT
         t = time.perf_counter()
-        text = self.stt.transcribe(audio)
+        spec, self.spec = self.spec, None
+        if spec is not None and spec[0] == self.ep.speech_frames and not spec[1].cancelled():
+            text, compute_ms = spec[1].result()          # usually already finished
+            self.metrics.speculative_hit = True
+        else:
+            if spec is not None:
+                spec[1].cancel()
+            self.brain.prefetch()                         # retrieval prefetch overlaps with STT
+            text, compute_ms = self._timed_stt(audio)
         self.metrics.stt_ms = (time.perf_counter() - t) * 1000
+        self.metrics.stt_compute_ms = compute_ms
         self.metrics.transcript = text
         if not text:
             log.info("no words recognized (%.0f ms of audio)", len(audio) / 16)
@@ -173,6 +212,8 @@ class VoiceAssistant:
                 self._start_turn(self.ep.audio())
             elif ev == "timeout":
                 self.sm.fire("timeout")
+            else:
+                self._maybe_speculate()
         elif st == State.FOLLOW_UP:
             if not self.ptt and self.wake is not None and self.wake.process(frame):
                 self._on_wake()
@@ -180,6 +221,7 @@ class VoiceAssistant:
             ev = self.ep.feed(frame)
             if ev == "start":
                 self.sm.fire("speech_start")       # same endpointer keeps collecting
+                self._maybe_speculate()
             elif ev == "timeout":
                 self.sm.fire("timeout")
                 if self.chime_on:
@@ -215,8 +257,9 @@ class VoiceAssistant:
         if self.worker_done.is_set() and not self.speaker.busy:
             action, self.pending_action = self.pending_action, None
             self.history.append(self.metrics)
-            log.info("turn: stt %.0f ms, retrieval %.0f ms, first token %s ms, first audio %s ms",
-                     self.metrics.stt_ms, self.metrics.retrieval_ms,
+            log.info("turn: stt %.0f ms on critical path (%.0f ms compute, speculative %s), retrieval %.0f ms, "
+                     "first token %s ms, first audio %s ms", self.metrics.stt_ms, self.metrics.stt_compute_ms,
+                     self.metrics.speculative_hit, self.metrics.retrieval_ms,
                      _r(self.metrics.llm_first_token_ms), _r(self.metrics.first_audio_ms))
             if action == "sleep":
                 self.sm.fire("sleep")

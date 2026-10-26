@@ -89,3 +89,38 @@ openWakeWord model (downloads blocked). `python main.py --ptt` here reports the 
   tool errors, reminder + timer alerts, notes, DuckDuckGo parser). Total 60 passing.
 
 **Not verified live:** web_search against DuckDuckGo/Brave (blocked here; it returns a graceful message).
+
+## Stage 6 – consolidation, bench, doctor, tests, README, run-on-login ✅
+- `python -m bi.doctor [--download] [--online] [--mic]`: OS, Python, packages, PortAudio + devices, echo mode,
+  models, TTS, API key (never printed), Ollama, database; each failure says how to fix it.
+- `python -m bi.bench`: per-stage latency with the real installed components; missing stages are skipped,
+  never estimated.
+- `python -m bi.service install|uninstall|status|print`: systemd user unit / LaunchAgent / Startup-folder launcher.
+- README with per-OS setup, privacy table, commands, memory CLI, encryption-at-rest, troubleshooting.
+- Tests: 76 passing (+ sentence splitter, speculative STT, wake word on a fixture, service files, integration).
+
+### Benchmark (this build machine: 4-core x86_64 cloud VM, no GPU)
+| Stage | Result |
+|---|---|
+| end of speech → endpoint detected | **960 ms** (900 ms configured trailing silence + 80 ms frame quantization; VAD 0.02 ms/frame) |
+| wake word inference (hey_jarvis) | 1.8 ms per 80 ms frame; fires on the fixture, 0 false wakes on the other fixtures |
+| STT (faster-whisper base.en) | **not measured** – model download blocked here; run `python -m bi.bench` on your laptop |
+| retrieval | 5 ms typical; p50 14.6 / p95 22.7 ms with 2,000 facts + 5,000 snippets (budget 100 ms) |
+| LLM first token / first sentence | **not measured** – no API key / Ollama here |
+| TTS first audio (Piper lessac-medium) | 57 ms median for a full first sentence (pyttsx3 fallback: 11 ms) |
+| endpoint → first audio, instant LLM | 130–190 ms (retrieval + Piper + threads), measured with the real wake model, VAD and Piper |
+
+**Biggest bottleneck and fix.** With the required 0.9 s trailing silence, the variable cost after the
+endpoint was STT: Whisper ran only once the silence ended, typically 0.3–0.8 s for base.en on a laptop CPU.
+Now Bi transcribes **speculatively** 300 ms into the silence. If you don't resume, the transcript is ready
+when the endpoint fires (tested: critical-path STT went from 500 ms to <100 ms with a 500 ms STT); if you do resume,
+the guess is discarded. The first sentence is also cut early at a comma, so Piper starts sooner.
+Expected end of speech → first audio on a laptop ≈ 960 + ~170 + LLM time to first chunk. The ~1.5 s target
+therefore holds when the model's first sentence arrives within ~400 ms. See "next improvements" for the
+remaining lever (speculative LLM start / shorter trailing silence).
+
+### What is placeholder / not verified live
+- **Wake word**: `hey_jarvis` placeholder (say "Hey Jarvis"); custom `hey_bi.onnx` per docs/WAKEWORD.md.
+- Real Anthropic and Ollama calls (no key / blocked); request shapes verified with the real SDK against a mock server.
+- Whisper STT (HuggingFace blocked). Real mic/speakers (none in the container).
+- VAD fixtures are synthesized speech + noise, not real laptop-mic recordings.

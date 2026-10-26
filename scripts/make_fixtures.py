@@ -51,6 +51,10 @@ def main() -> None:
     long = speech("This is a very long monologue that keeps going and going without any real pause. " * 3)
     write_wav(OUT / "long_speech.wav", mix(silence(0.3), long, silence(1.0)), SR)
     write_wav(OUT / "stop.wav", mix(silence(0.3), speech("stop"), silence(1.5)), SR)
+    # wake word placeholder ("hey jarvis") followed by a question, as a user would say it
+    write_wav(OUT / "wake_then_question.wav",
+              mix(silence(0.8), speech("hey jarvis"), silence(0.4), speech("what time is my dentist appointment"),
+                  silence(2.0)), SR)
     for p in sorted(OUT.glob("*.wav")):
         pcm, _ = read_wav(p)
         print(f"{p.name:24} {len(pcm) / SR:5.2f} s")

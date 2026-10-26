@@ -199,3 +199,55 @@ def test_push_to_talk_keys(make_va):
     va.keys = Keys()
     assert feed(va, SILENCE[:1] + SPEECH, until=lambda v: len(v.history) == 1)
     assert states(va)[:3] == [S.LISTENING, S.THINKING, S.SPEAKING]
+
+
+class SlowSTT(FakeSTT):
+    def __init__(self, texts, delay):
+        super().__init__(texts)
+        self.delay = delay
+        self.calls = 0
+
+    def transcribe(self, pcm, sr=16000):
+        self.calls += 1
+        time.sleep(self.delay)
+        return super().transcribe(pcm, sr)
+
+
+def _run_with_stt(make_va, speculative):
+    va = make_va(["Okay."], ["hello there"], **{"stt.speculative": speculative})
+    va.stt = SlowSTT(["hello there"], delay=0.5)
+    va.wake.armed = True
+    feed_rt(va, SILENCE[:2] + SPEECH, until=lambda v: v.history)
+    return va
+
+
+def feed_rt(va, frames_, until, timeout=10):
+    """Feed frames at real-time pace (80 ms) so speculative STT can run during the silence."""
+    end = time.monotonic() + timeout
+    for f in list(frames_) + [SILENCE[0]] * 200:
+        t = time.monotonic()
+        va.step(f)
+        if until(va) or time.monotonic() > end:
+            return
+        time.sleep(max(0.0, 0.08 - (time.monotonic() - t)))
+
+
+def test_speculative_stt_takes_stt_off_the_critical_path(make_va):
+    off = _run_with_stt(make_va, speculative=False).history[0]
+    on_va = _run_with_stt(make_va, speculative=True)
+    on = on_va.history[0]
+    assert off.stt_ms >= 450 and not off.speculative_hit
+    assert on.speculative_hit and on.stt_ms < 100 and on.stt_compute_ms >= 450
+    assert on.transcript == "hello there" and on_va.stt.calls == 1
+
+
+def test_speculation_discarded_when_user_resumes(make_va):
+    va = make_va(["Okay."], [], **{"stt.speculative": True})
+    va.stt = SlowSTT(["set a timer", "set a timer for ten minutes"], delay=0.05)
+    va.wake.armed = True
+    feed_rt(va, SILENCE[:2] + frames("pause_mid_sentence.wav"), until=lambda v: v.history)
+    m = va.history[0]
+    # the 500 ms pause triggered a speculative run on "set a timer"; speech resumed, so that guess was
+    # discarded and a second run after the real end produced the full transcript
+    assert va.stt.calls == 2
+    assert m.transcript == "set a timer for ten minutes"

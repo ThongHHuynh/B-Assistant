@@ -102,6 +102,9 @@ stt:
   device: cpu              # cpu | cuda | auto
   beam_size: 1
   language: en
+  initial_prompt: ""       # e.g. "Hey Bi." to bias spelling of names
+  speculative: true        # transcribe during the trailing silence; result is ready at the endpoint
+  speculative_after_ms: 300
 
 tts:
   engine: piper            # piper | pyttsx3 | system   (falls back automatically)
