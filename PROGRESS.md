@@ -72,3 +72,20 @@ flagged below as **not yet verified live**.
 
 **Not verified live:** real microphone/speakers (container has none), Whisper STT, Piper voice and the
 openWakeWord model (downloads blocked). `python main.py --ptt` here reports the missing Whisper model clearly.
+
+## Stage 5 – tools and reminders ✅
+- Registry with JSON schemas, input validation (model output is untrusted), deterministic order (cacheable).
+- Tools: get_time, take_note / read_notes, set_timer, set_reminder, list_reminders, cancel_reminder,
+  web_search (DuckDuckGo HTML, no key; Brave with BRAVE_API_KEY; or none), file_search (read-only,
+  name + content incl. PDF/DOCX, time-budgeted, configured folders only).
+- Enforcement: a tool that changes state or uses the network is disabled unless listed in
+  `tools.side_effects` / `tools.network`; every such call is logged to the `tool_log` table.
+- Spoken confirmation for `tools.require_confirmation` ("Want me to set a pasta timer for 5 minutes?"):
+  yes → the paused turn resumes with the identical system prompt and the tool result; no → "Okay, I won't";
+  anything else → the pending action is dropped and the new request handled normally.
+- Reminders/timers persist in SQLite, fire from a scheduler thread, are spoken (chime + voice) when Bi is
+  idle, and missed ones are announced after a restart. No destructive tools exist.
+- Tests: 10 new (validation, config enforcement, confirm yes/no/ignored, read-only tool flow,
+  tool errors, reminder + timer alerts, notes, DuckDuckGo parser). Total 60 passing.
+
+**Not verified live:** web_search against DuckDuckGo/Brave (blocked here; it returns a graceful message).

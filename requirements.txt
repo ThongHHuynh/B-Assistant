@@ -21,6 +21,8 @@ pyttsx3==2.99
 # memory: embeddings (ONNX MiniLM) + vector index
 tokenizers==0.23.3
 sqlite-vec==0.1.9
+# time zones (Windows has no system tz database)
+tzdata==2026.5
 # file_search readers
 pypdf==6.21.2
 python-docx==1.2.0
